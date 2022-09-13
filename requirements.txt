@@ -1,0 +1,5 @@
+streamlit==1.11.0
+PySide2==5.15.2.1
+Pillow==9.2.0
+datasetinsights==1.1.2
+numpy==1.23.2
