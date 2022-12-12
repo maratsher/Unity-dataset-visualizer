@@ -19,7 +19,7 @@ import helpers.custom_components_setup as cc
 import helpers.datamaker_dataset_helper as datamaker
 
 from Dataset import Dataset, Image
-from conventer import pd, convent
+from converter import pd, convent
 
 # Set up tkinter
 root = tk.Tk()
