@@ -1,6 +1,5 @@
 import sys
 import re
-import os
 import json
 import argparse
 import subprocess
@@ -12,14 +11,13 @@ import streamlit.components.v1 as components
 import tkinter as tk
 from tkinter import filedialog
 
-from datasetinsights.datasets.unity_perception import AnnotationDefinitions, MetricDefinitions
-from datasetinsights.datasets.unity_perception.captures import Captures
-
 import helpers.custom_components_setup as cc
 import helpers.datamaker_dataset_helper as datamaker
+from PIL import Image
 
-from Dataset import Dataset, Image
-from converter import pd, convent
+from Dataset import Dataset
+import converter
+from converter import pd, convent, prepare_ds_info, os, AnnotationDefinitions, MetricDefinitions, Captures
 
 # Set up tkinter
 root = tk.Tk()
@@ -27,6 +25,21 @@ root.withdraw()
 
 # Make folder picker dialog appear on top of other windows
 root.wm_attributes('-topmost', 1)
+
+def get_img_size(base_dataset_dir: str) -> tuple:
+    """Get img size from first img in datset
+
+    Args:
+        base_dataset_dir (str): current base dataset dir 
+
+    Returns:
+        tuple: image size (width, heigth)
+    """
+    rgb_dirs = [dirs for dirs in os.listdir(base_dataset_dir) if str(dirs).startswith("RGB")]
+    assert len(rgb_dirs) == 1, "Make sure that in the basic diretory only one folder starts with 'RGB*'"
+    img_dir = os.path.join(base_dataset_dir, rgb_dirs[0])
+    img_path = os.path.join(img_dir, os.listdir(img_dir)[0])
+    return Image.open(img_path).size
 
 def datamaker_dataset(path: str) -> Optional[Dict[int, Dataset]]:
     """ Reads the given path as a datamaker dataset
@@ -151,6 +164,36 @@ def display_number_frames(num_frames: int):
     """
     st.sidebar.markdown("### Number of frames: " + str(num_frames))
 
+def display_labels_fonfig():
+    """Creates a sidebar display for labels config menu
+    """
+    # Display convent labels menu
+    st.sidebar.markdown("# Converting config")
+
+    # TODO Make manual set image size
+    # if st.sidebar.checkbox('Auto define', key="manual_disabled"):
+    #     st.session_state.width = width
+    #     st.session_state.height = height
+
+    # st.sidebar.number_input('Image widht',step=1,
+    # disabled=st.session_state.manual_disabled, key="in_w")
+    # st.session_state.height = st.sidebar.number_input('Image height', step=1,
+    # disabled=st.session_state.manual_disabled, key="in_h")
+    # if (st.sidebar.button("Set", disabled=st.session_state.manual_disabled)):
+    #     st.session_state.width = st.session_state.in_w
+    #     st.session_state.height = st.session_state.in_h
+    #     st.experimental_rerun()
+
+    # Display src yolo folder 
+    st.sidebar.markdown("### Current lables save folder:")
+    st.sidebar.markdown(str(st.session_state.src_yolo_dir))
+
+    #Open choose dir dailog
+    if st.sidebar.button("Change save folder"):
+        st.session_state.src_yolo_dir = folder_select()
+        st.experimental_rerun()
+
+
 
 def preview_dataset(base_dataset_dir: str):
     """
@@ -160,12 +203,20 @@ def preview_dataset(base_dataset_dir: str):
     """
 
     # Create state with default values
+    width, height = get_img_size(base_dataset_dir)
+
     create_session_state_data({
         'zoom_image': '-1',
         'start_at': '0',
         'num_cols': '3',
         'curr_dir': base_dataset_dir,
-        'src_yolo_dir': base_dataset_dir + "YoloSrc",
+        'src_yolo_dir': os.path.join(base_dataset_dir , "YoloSrc"),
+
+        'manual_disabled': True,
+        'width': width,
+        'height': height,
+        'in_w': width,
+        'in_h': height,
 
         'just_opened_zoom': True,
         'just_opened_grid': True,
@@ -183,45 +234,24 @@ def preview_dataset(base_dataset_dir: str):
     base_dataset_dir = st.session_state.curr_dir
 
     # Display select dataset menu
-    st.sidebar.markdown("# Select Dataset")
+    st.sidebar.markdown("# Options")
     if st.sidebar.button("Open Dataset"):
         st.session_state.curr_dir = folder_select()
         st.experimental_rerun()
-
-    # Display convent labels menu
-    st.sidebar.markdown("# Converting Labels")
-    if st.sidebar.button("Change Folder"):
-        st.session_state.src_yolo_dir = folder_select()
-        st.experimental_rerun()
         
-    if st.sidebar.button("Convert to Yolo Labels"):
-        # получаем параметры датасета unity с помощью datasetinsights 
-        captures = Captures(base_dataset_dir).filter(def_id=AnnotationDefinitions(base_dataset_dir).table.to_dict('records')[0]["id"])
-        
-        # путь, куда буду сохранены новые лейблы
-        path_to_save_dir = st.session_state.src_yolo_dir+"/"
+    if st.sidebar.button("Convert to Yolo Labels"):     
+        # the path where the yolo labels will be saved
+        path_to_save_dir = st.session_state.src_yolo_dir
         if not os.path.isdir(path_to_save_dir):
             os.mkdir(path_to_save_dir)
-        
-        # получить размер для каждого изрбражения в папке
-        image_params = []
-        for fn in captures["filename"]:
-            td = dict()
-            td["width"], td["height"] = Image.open(base_dataset_dir+"/"+fn).size
-            image_params.append(td)
-        
-        # формирует единный pd.DataFrame со всеми параметрами датасета
-        pd_img_params = pd.Series(image_params).rename("img_params")
-        captures = pd.concat([captures["filename"], captures["annotation.values"],
-        pd_img_params], axis=1)
 
-        # конвертируем 
-        if convent(captures, path_to_save_dir):
-            st.success('Метки успешно сохранены в '+str(st.session_state.src_yolo_dir)+"!")
+        # get images size
+        image_size = (st.session_state.width, st.session_state.height)
 
-    # Display src yolo folder 
-    st.sidebar.markdown("# Current yolo labels save folder:")
-    st.sidebar.markdown(str(st.session_state.src_yolo_dir))
+        # convert to yolo labels
+        assert convent(prepare_ds_info(base_dataset_dir), path_to_save_dir, image_size), "Failed convert!"
+
+        st.success('Метки успешно сохранены в '+str(st.session_state.src_yolo_dir)+"!")
 
     if base_dataset_dir is None:
         st.markdown("# Please open a dataset folder:")
@@ -257,10 +287,12 @@ def preview_dataset(base_dataset_dir: str):
                 return
 
             if len(folder_name) >= 1:
-                st.sidebar.markdown("# Current dataset:")
-                st.sidebar.write(folder_name)
+                st.sidebar.markdown("# Dataset info")
+                st.sidebar.write("### Dir: "+folder_name+"/")
+                st.sidebar.markdown(f"### Image size: ({st.session_state.width}, {st.session_state.height})")
 
             display_number_frames(ds.length())
+            display_labels_fonfig()
 
             available_labelers = ds.get_available_labelers()
             labelers = create_sidebar_labeler_menu(available_labelers)
@@ -276,10 +308,12 @@ def preview_dataset(base_dataset_dir: str):
         # if it is a datamaker dataset
         else:
             if len(folder_name) >= 1:
-                st.sidebar.markdown("# Current dataset:")
-                st.sidebar.write(folder_name)
+                st.sidebar.markdown("# Dataset info:")
+                st.sidebar.write("### Dir: "+folder_name+"/")
+                st.sidebar.markdown(f"### Image size: ({st.session_state.width}, {st.session_state.height})")
 
             display_number_frames(datamaker.get_dataset_length_with_instances(instances))
+            display_labels_fonfig()
 
             # zoom_image is negative if the application isn't in zoom mode
             index = int(st.session_state.zoom_image)            
@@ -316,6 +350,9 @@ def preview_dataset(base_dataset_dir: str):
         if st.button("Select dataset folder"):
             st.session_state.curr_dir = folder_select()
             st.experimental_rerun()
+
+    
+    st.sidebar.markdown("#")
 
 
 def folder_select():
