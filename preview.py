@@ -13,11 +13,10 @@ from tkinter import filedialog
 
 import helpers.custom_components_setup as cc
 import helpers.datamaker_dataset_helper as datamaker
-from PIL import Image
 
 from Dataset import Dataset
 import converter
-from converter import pd, convent, prepare_ds_info, os, AnnotationDefinitions, MetricDefinitions, Captures
+from converter import pd, convert, prepare_ds_info, os, AnnotationDefinitions, MetricDefinitions, Captures, Image
 
 # Set up tkinter
 root = tk.Tk()
@@ -164,25 +163,11 @@ def display_number_frames(num_frames: int):
     """
     st.sidebar.markdown("### Number of frames: " + str(num_frames))
 
-def display_labels_fonfig():
+def display_labels_config():
     """Creates a sidebar display for labels config menu
     """
     # Display convent labels menu
     st.sidebar.markdown("# Converting config")
-
-    # TODO Make manual set image size
-    # if st.sidebar.checkbox('Auto define', key="manual_disabled"):
-    #     st.session_state.width = width
-    #     st.session_state.height = height
-
-    # st.sidebar.number_input('Image widht',step=1,
-    # disabled=st.session_state.manual_disabled, key="in_w")
-    # st.session_state.height = st.sidebar.number_input('Image height', step=1,
-    # disabled=st.session_state.manual_disabled, key="in_h")
-    # if (st.sidebar.button("Set", disabled=st.session_state.manual_disabled)):
-    #     st.session_state.width = st.session_state.in_w
-    #     st.session_state.height = st.session_state.in_h
-    #     st.experimental_rerun()
 
     # Display src yolo folder 
     st.sidebar.markdown("### Current lables save folder:")
@@ -193,7 +178,15 @@ def display_labels_fonfig():
         st.session_state.src_yolo_dir = folder_select()
         st.experimental_rerun()
 
+    st.sidebar.markdown("### Image size")
+    # TODO Make manual set image size
+    st.sidebar.checkbox('Auto mode', key="auto_mode")
 
+    st.sidebar.number_input('Image widht',step=1,
+    disabled=st.session_state.auto_mode, key="in_w")
+
+    st.sidebar.number_input('Image height', step=1,
+    disabled=st.session_state.auto_mode, key="in_h")
 
 def preview_dataset(base_dataset_dir: str):
     """
@@ -212,7 +205,7 @@ def preview_dataset(base_dataset_dir: str):
         'curr_dir': base_dataset_dir,
         'src_yolo_dir': os.path.join(base_dataset_dir , "YoloSrc"),
 
-        'manual_disabled': True,
+        'auto_mode': True,
         'width': width,
         'height': height,
         'in_w': width,
@@ -245,11 +238,11 @@ def preview_dataset(base_dataset_dir: str):
         if not os.path.isdir(path_to_save_dir):
             os.mkdir(path_to_save_dir)
 
-        # get images size
-        image_size = (st.session_state.width, st.session_state.height)
-
-        # convert to yolo labels
-        assert convent(prepare_ds_info(base_dataset_dir), path_to_save_dir, image_size), "Failed convert!"
+        # prepare dataset info
+        dataset_info = prepare_ds_info(base_dataset_dir, auto_mode=st.session_state.auto_mode,
+        manual_img_size=(st.session_state.in_w, st.session_state.in_h))
+        # try convert
+        assert convert(dataset_info, path_to_save_dir), "Failed convert!"
 
         st.success('Метки успешно сохранены в '+str(st.session_state.src_yolo_dir)+"!")
 
@@ -292,7 +285,7 @@ def preview_dataset(base_dataset_dir: str):
                 st.sidebar.markdown(f"### Image size: ({st.session_state.width}, {st.session_state.height})")
 
             display_number_frames(ds.length())
-            display_labels_fonfig()
+            display_labels_config()
 
             available_labelers = ds.get_available_labelers()
             labelers = create_sidebar_labeler_menu(available_labelers)
@@ -313,7 +306,7 @@ def preview_dataset(base_dataset_dir: str):
                 st.sidebar.markdown(f"### Image size: ({st.session_state.width}, {st.session_state.height})")
 
             display_number_frames(datamaker.get_dataset_length_with_instances(instances))
-            display_labels_fonfig()
+            display_labels_config()
 
             # zoom_image is negative if the application isn't in zoom mode
             index = int(st.session_state.zoom_image)            

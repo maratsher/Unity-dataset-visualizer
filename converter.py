@@ -5,6 +5,8 @@ import os
 from datasetinsights.datasets.unity_perception import AnnotationDefinitions, MetricDefinitions
 from datasetinsights.datasets.unity_perception.captures import Captures
 
+from PIL import Image
+
 class FileFormatError(Exception):
     pass
 
@@ -42,7 +44,7 @@ def compute_yolo_param(x_abs_raw: int, y_abs_raw: int, width_abs_raw: int,
     return [x_rel_prep, y_rel_prep, width_rel_prep, height_rel_prep]
 
 
-def convent_to_yolo_format(raw_labels: list, image_size:tuple )->list:
+def convent_to_yolo_format(raw_labels: list, image_size:tuple)->list:
     """The function generates files for labels in Yolo format
 
     Args:
@@ -108,11 +110,13 @@ def save_to_file_labels_name(labels_names: list, file_name: str,path_to_save_dir
         return False
     return True
 
-def prepare_ds_info(base_dataset_dir: str) -> tuple[pd.DataFrame, list]:
+def prepare_ds_info(base_dataset_dir: str, auto_mode = True, manual_img_size = (0,0)) -> tuple[pd.DataFrame, list]:
     """The functions prepare all information about dataset 
 
     Args:
         base_dataset_dir (str): current base dataset di
+        auto_mode (bool): if true auto get image size mode else use manual image size from manual_img_size
+        manual_img_size (tuple): manual image size, use if auto_mode False
 
     Returns:
         tuple[pd.DataFrame, list]: datsset info: image filenames, labels, labels name
@@ -123,7 +127,26 @@ def prepare_ds_info(base_dataset_dir: str) -> tuple[pd.DataFrame, list]:
     labels_info = []
     # get the parameters of the unity dataset using datasetinsights
     captures = Captures(base_dataset_dir).filter(def_id=AnnotationDefinitions(base_dataset_dir).table.to_dict('records')[0]["id"])
-    captures = pd.concat([captures["filename"], captures["annotation.values"]], axis=1)
+    # get image sizes auto or manual
+    if auto_mode:
+        # get the size for each image in a folder
+        image_params = []
+        for fn in captures["filename"]:
+            temp = tuple()
+            temp = Image.open(os.path.join(base_dataset_dir,fn)).size
+            image_params.append(temp)
+        pd_img_sizes = pd.Series(image_params).rename("img_params")
+        print("AUTO: ")
+        print(pd_img_sizes)
+    else:
+        # get sizes from manual_img_size
+        image_params = []
+        for _ in range(len(captures["filename"])):
+            image_params.append(manual_img_size)
+        pd_img_sizes = pd.Series(image_params).rename("img_params")
+        print("MANUAL: ")
+        print(pd_img_sizes)
+    captures = pd.concat([captures["filename"], captures["annotation.values"], pd_img_sizes], axis=1)
 
     # get the names of the labels
     annotation_def = AnnotationDefinitions(data_root=base_dataset_dir)
@@ -133,7 +156,7 @@ def prepare_ds_info(base_dataset_dir: str) -> tuple[pd.DataFrame, list]:
 
     return (captures, labels_info)
 
-def convent(ds_info: tuple[pd.DataFrame, list], path_to_save_dir:str, image_size: tuple) -> bool:
+def convert(ds_info: tuple[pd.DataFrame, list], path_to_save_dir:str) -> bool:
     """The function takes input information about the dataset and generates labels in Yolo format
 
     Args:
@@ -151,7 +174,7 @@ def convent(ds_info: tuple[pd.DataFrame, list], path_to_save_dir:str, image_size
 
     for _, row in pd_df.iterrows():
         row["annotation.values"] = convent_to_yolo_format(row["annotation.values"],
-        image_size)
+        row["img_params"])
         file_name = row["filename"].split("/")[1].split(".")[0]
         content = [" ".join(map(str,l))+"\n" for l in row["annotation.values"]]
         if not save_to_file(content, file_name, path_to_save_dir):
