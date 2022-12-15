@@ -1,8 +1,6 @@
-import sys
 import re
 import json
 import argparse
-import subprocess
 from typing import List, Tuple, Optional, Dict
 
 import streamlit as st
@@ -15,8 +13,7 @@ import helpers.custom_components_setup as cc
 import helpers.datamaker_dataset_helper as datamaker
 
 from Dataset import Dataset
-import converter
-from converter import pd, convert, prepare_ds_info, os, AnnotationDefinitions, MetricDefinitions, Captures, Image
+from converter import convert, prepare_ds_info, os, AnnotationDefinitions, MetricDefinitions, Captures, Image
 
 # Set up tkinter
 root = tk.Tk()

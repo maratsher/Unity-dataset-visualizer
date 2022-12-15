@@ -75,7 +75,7 @@ def save_to_file(content: list, file_name: str, path_to_save_dir: str) -> bool:
         path_to_save_dir (str): the path to the directory where the file will be saved
 
     Returns:
-        bool: true if successfully, else false
+        bool: true if successfully save, else false
     """
     try:
         with open(os.path.join(path_to_save_dir, file_name+".txt"),"w") as txt_file:
@@ -97,7 +97,7 @@ def save_to_file_labels_name(labels_names: list, file_name: str,path_to_save_dir
         path_to_save_dir (str): the path to the directory where the file will be saved
 
     Returns:
-        bool: _description_
+        bool: true if successfully save, else false
     """
     try:
         with open(os.path.join(path_to_save_dir, file_name+".txt"),"w") as txt_file:
@@ -136,16 +136,12 @@ def prepare_ds_info(base_dataset_dir: str, auto_mode = True, manual_img_size = (
             temp = Image.open(os.path.join(base_dataset_dir,fn)).size
             image_params.append(temp)
         pd_img_sizes = pd.Series(image_params).rename("img_params")
-        print("AUTO: ")
-        print(pd_img_sizes)
     else:
         # get sizes from manual_img_size
         image_params = []
         for _ in range(len(captures["filename"])):
             image_params.append(manual_img_size)
         pd_img_sizes = pd.Series(image_params).rename("img_params")
-        print("MANUAL: ")
-        print(pd_img_sizes)
     captures = pd.concat([captures["filename"], captures["annotation.values"], pd_img_sizes], axis=1)
 
     # get the names of the labels
