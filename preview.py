@@ -1,36 +1,52 @@
-import sys
 import re
-import os
 import json
 import argparse
-import subprocess
 from typing import List, Tuple, Optional, Dict
 
 import streamlit as st
 import streamlit.components.v1 as components
 
-from datasetinsights.datasets.unity_perception import AnnotationDefinitions, MetricDefinitions
-from datasetinsights.datasets.unity_perception.captures import Captures
+import tkinter as tk
+from tkinter import filedialog
 
 import helpers.custom_components_setup as cc
 import helpers.datamaker_dataset_helper as datamaker
 
 from Dataset import Dataset
+from converter import convert, prepare_ds_info, os, AnnotationDefinitions, MetricDefinitions, Captures, Image
 
+# Set up tkinter
+root = tk.Tk()
+root.withdraw()
+
+# Make folder picker dialog appear on top of other windows
+root.wm_attributes('-topmost', 1)
+
+def get_img_size(base_dataset_dir: str) -> tuple:
+    """Get img size from first img in datset
+
+    Args:
+        base_dataset_dir (str): current base dataset dir 
+
+    Returns:
+        tuple: image size (width, heigth)
+    """
+    rgb_dirs = [dirs for dirs in os.listdir(base_dataset_dir) if str(dirs).startswith("RGB")]
+    assert len(rgb_dirs) == 1, "Make sure that in the basic diretory only one folder starts with 'RGB*'"
+    img_dir = os.path.join(base_dataset_dir, rgb_dirs[0])
+    img_path = os.path.join(img_dir, os.listdir(img_dir)[0])
+    return Image.open(img_path).size
 
 def datamaker_dataset(path: str) -> Optional[Dict[int, Dataset]]:
     """ Reads the given path as a datamaker dataset
-
         Assumes that the given path contains a folder structure as follows:
         - path
             - urn_app_params folders
                 - instance_#
                     - attempt_#
                         - Normal Perception dataset folder structure
-
         :param path: path to dataset
         :type path: str
-
         :return: Dictionary containing an entry for every instance, the key is the instance number, 
                 each entry is a tuple as follows: (AnnotationDefinition, MetricDefiniton, Captures, number of captures, 
                 absolute path to instance)
@@ -66,7 +82,6 @@ def read_datamaker_instance_output(path, instances):
 def create_session_state_data(attribute_values: Dict[str, any]):
     """ Takes a dictionary of attributes to values to create the streamlit session_state object. 
     The values are the default values
-
     :param attribute_values: dictionary of session_state parameter to default values
     :type attribute_values: Dict[str, any]
     """
@@ -78,10 +93,8 @@ def create_session_state_data(attribute_values: Dict[str, any]):
 def create_sidebar_labeler_menu(available_labelers: List[str]) -> Dict[str, bool]:
     """
     Creates a streamlit sidebar menu that displays checkboxes and radio buttons to select which labelers to display
-
     :param available_labelers: List of strings representing labelers
     :type available_labelers: List[str]
-
     :return: Dictionary where keys are the available_labelers and values are bool representing if they have been chosen
     :rtype: Dict[str, bool]
     """
@@ -142,27 +155,58 @@ def create_sidebar_labeler_menu(available_labelers: List[str]) -> Dict[str, bool
 def display_number_frames(num_frames: int):
     """
     Creates a sidebar display for the number of frames in the selected dataset
-
     :param num_frames: Number of frames in the selected dataset
     :type num_frames: int
     """
     st.sidebar.markdown("### Number of frames: " + str(num_frames))
 
+def display_labels_config():
+    """Creates a sidebar display for labels config menu
+    """
+    # Display convent labels menu
+    st.sidebar.markdown("# Converting config")
+
+    # Display src yolo folder 
+    st.sidebar.markdown("### Current lables save folder:")
+    st.sidebar.markdown(str(st.session_state.src_yolo_dir))
+
+    #Open choose dir dailog
+    if st.sidebar.button("Change save folder"):
+        st.session_state.src_yolo_dir = folder_select()
+        st.experimental_rerun()
+
+    st.sidebar.markdown("### Image size")
+    # TODO Make manual set image size
+    st.sidebar.checkbox('Auto mode', key="auto_mode")
+
+    st.sidebar.number_input('Image widht',step=1,
+    disabled=st.session_state.auto_mode, key="in_w")
+
+    st.sidebar.number_input('Image height', step=1,
+    disabled=st.session_state.auto_mode, key="in_h")
 
 def preview_dataset(base_dataset_dir: str):
     """
     Adds streamlit components to the app to construct the dataset preview.
-
     :param base_dataset_dir: The directory that contains the perception dataset.
     :type base_dataset_dir: str
     """
 
     # Create state with default values
+    width, height = get_img_size(base_dataset_dir)
+
     create_session_state_data({
         'zoom_image': '-1',
         'start_at': '0',
         'num_cols': '3',
         'curr_dir': base_dataset_dir,
+        'src_yolo_dir': os.path.join(base_dataset_dir , "YoloSrc"),
+
+        'auto_mode': True,
+        'width': width,
+        'height': height,
+        'in_w': width,
+        'in_h': height,
 
         'just_opened_zoom': True,
         'just_opened_grid': True,
@@ -180,14 +224,30 @@ def preview_dataset(base_dataset_dir: str):
     base_dataset_dir = st.session_state.curr_dir
 
     # Display select dataset menu
-    st.sidebar.markdown("# Select Dataset")
+    st.sidebar.markdown("# Options")
     if st.sidebar.button("Open Dataset"):
-        folder_select()
+        st.session_state.curr_dir = folder_select()
+        st.experimental_rerun()
+        
+    if st.sidebar.button("Convert to Yolo Labels"):     
+        # the path where the yolo labels will be saved
+        path_to_save_dir = st.session_state.src_yolo_dir
+        if not os.path.isdir(path_to_save_dir):
+            os.mkdir(path_to_save_dir)
+
+        # prepare dataset info
+        dataset_info = prepare_ds_info(base_dataset_dir, auto_mode=st.session_state.auto_mode,
+        manual_img_size=(st.session_state.in_w, st.session_state.in_h))
+        # try convert
+        assert convert(dataset_info, path_to_save_dir), "Failed convert!"
+
+        st.success('Метки успешно сохранены в '+str(st.session_state.src_yolo_dir)+"!")
 
     if base_dataset_dir is None:
         st.markdown("# Please open a dataset folder:")
         if st.button("Open Dataset", key="second open dataset"):
-            folder_select()
+            st.session_state.curr_dir = folder_select()
+            st.experimental_rerun()
         return
 
     # Display name of dataset (Name of folder)
@@ -212,14 +272,17 @@ def preview_dataset(base_dataset_dir: str):
 
                 st.markdown("# Please open a dataset folder:")
                 if st.button("Open Dataset", key="second open dataset"):
-                    folder_select()
+                    st.session_state.curr_dir = folder_select()
+                    st.experimental_rerun()
                 return
 
             if len(folder_name) >= 1:
-                st.sidebar.markdown("# Current dataset:")
-                st.sidebar.write(folder_name)
+                st.sidebar.markdown("# Dataset info")
+                st.sidebar.write("### Dir: "+folder_name+"/")
+                st.sidebar.markdown(f"### Image size: ({st.session_state.width}, {st.session_state.height})")
 
             display_number_frames(ds.length())
+            display_labels_config()
 
             available_labelers = ds.get_available_labelers()
             labelers = create_sidebar_labeler_menu(available_labelers)
@@ -235,10 +298,12 @@ def preview_dataset(base_dataset_dir: str):
         # if it is a datamaker dataset
         else:
             if len(folder_name) >= 1:
-                st.sidebar.markdown("# Current dataset:")
-                st.sidebar.write(folder_name)
+                st.sidebar.markdown("# Dataset info:")
+                st.sidebar.write("### Dir: "+folder_name+"/")
+                st.sidebar.markdown(f"### Image size: ({st.session_state.width}, {st.session_state.height})")
 
             display_number_frames(datamaker.get_dataset_length_with_instances(instances))
+            display_labels_config()
 
             # zoom_image is negative if the application isn't in zoom mode
             index = int(st.session_state.zoom_image)            
@@ -273,35 +338,22 @@ def preview_dataset(base_dataset_dir: str):
     else:
         st.markdown("# Please select a valid dataset folder:")
         if st.button("Select dataset folder"):
-            folder_select()
+            st.session_state.curr_dir = folder_select()
+            st.experimental_rerun()
+
+    
+    st.sidebar.markdown("#")
 
 
 def folder_select():
     """ Runs a subprocess that opens a file dialog to select a new directory, this will update st.session_state.curr_dir
     """
-    output = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(os.path.realpath(__file__)), "helpers/folder_explorer.py")],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-    )
-
-    if str(output.stdout).split("\'")[1] == "" or output.stdout is None:
-        return
-
-    stdout = str(os.path.abspath(str(output.stdout).split("\'")[1]))
-
-    if stdout[-4:] == "\\r\\n":
-        stdout = stdout[:-4]
-    elif stdout[-2:] == '\\n':
-        stdout = stdout[:-2]
-    proj_root = stdout.replace("\\", "/") + "/"
-
-    st.session_state.curr_dir = proj_root
-    st.experimental_rerun()
+    dir_path = st.text_input('Selected folder:', filedialog.askdirectory(master=root))
+    return dir_path
 
 
 def create_grid_view_controls(num_rows: int, dataset_size: int) -> Tuple[int, int]:
     """ Creates the controls for grid view
-
     :param num_rows: number of rows to display
     :type num_rows: int
     :param dataset_size: The size of the dataset
@@ -333,7 +385,6 @@ def create_grid_view_controls(num_rows: int, dataset_size: int) -> Tuple[int, in
 def create_grid_containers(num_rows: int, num_cols: int, start_at: int, dataset_size: int) -> List[any]:
     """ Creates the streamlit containers that will hold the images in a grid, this must happen before placing the images
     so that when clicking on "Expand frame" it doesn't need to reload every image before opening in zoom view
-
     :param num_rows: Number of rows
     :type num_rows: int
     :param num_cols: Number of columns
@@ -364,7 +415,6 @@ def create_grid_containers(num_rows: int, num_cols: int, start_at: int, dataset_
 
 def grid_view(num_rows: int, ds: Dataset, labelers: Dict[str, bool]):
     """ Creates the grid view streamlit components
-
     :param num_rows: Number of rows
     :type num_rows: int
     :param ds: Current Dataset
@@ -396,7 +446,6 @@ def grid_view_instances(
         instances: Dict[int, Tuple[AnnotationDefinitions, MetricDefinitions, Captures, int, str]],
         labelers: Dict[str, bool]):
     """ Creates the grid view streamlit components when using a Datamaker dataset
-
     :param num_rows: Number of rows
     :type num_rows: int
     :param instances: Dictionary of instances
@@ -425,7 +474,6 @@ def zoom(index: int,
          ds: Dataset,
          labelers: Dict[str, bool]):
     """ Creates streamlit components for Zoom in view
-
     :param index: Index of the image
     :type index: int
     :param offset: Is how much the index needs to be offset, this is only needed to 
@@ -509,7 +557,6 @@ def zoom(index: int,
 def preview_app(args):
     """
     Starts the dataset preview app.
-
     :param args: Arguments for the app, such as dataset
     :type args: Namespace
     """
